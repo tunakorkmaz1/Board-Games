@@ -1,0 +1,118 @@
+---
+title: "Research Topics"
+author: "Statistically Significant - Darli Seranaj, Jacob You, Tuna Korkmaz"
+format: pdf
+execute: 
+  warning: false
+  message: false
+editor: visual
+---
+
+## Research Topic 1
+
+1\. Brief description of the topic
+
+This research topic would explore the relationship between different types of board game characteristics (e.g., complexity, playing time, category, publication year, number of players) and would compare them to how a game's average user rating or popularity is scored. We would take data from BoardGameGeek, one of the largest online databases for board games, allowing us to analyze different relationships or the effects of specific variables and how they affect player satisfaction.
+
+2\. Motivation for investigating this topic
+
+Modern board games is a very popular and growing hobby, with an industry worth billions of dollars annually. Being able to understand how certain elements or traits could affect the ratings or preferences of an audience would be incredible useful for publishers and designers making games, and would help hobbyists decide when to buy new games.
+
+3\. Potential audiences
+
+Board game publishers and designer can use these results and insights to refine what game mechanics they want, target ideal complexity levels, market effectively, and more.
+
+Retailers and distributors can use data on what drives high ratings and popularity and can use these decisions to help them decide which games to stock.
+
+Hobbyists and casual gamers can discover trends about which features tend to be associated with higher satisfaction (e.g., certain categories, playing times).
+
+4\. Two or three potential research questions
+
+Does higher game complexity lead to higher user ratings?
+
+For instance, are “heavier” strategy games more favorably reviewed compared to lighter, quick-play games once we control for factors like playing time or release year? Or is there not a strong relationship?
+
+Which factors most strongly predict a game’s average rating?
+
+Statistics such as year of publication, length of play, mechanics (e.g., cooperative, deck-building), minimum/maximum player counts, etc.
+
+What game attributes are associated with a game being in the Top 100 list?
+
+We could investigate which specific features significantly increase the odds of landing in the top category of board games.
+
+5\. Ideas about data and potential sources
+
+BoardGameGeek Datasets on Kaggle: There are several public CSV files containing thousands of board games along with variables like ‘average rating,’ ‘complexity,’ ‘year published,’ and ‘number of ratings'. BoardGameGeek also offers an API that returns XML data for each game, including rating breakdowns and categories.
+
+\pagebreak
+
+## Research Topic 2
+
+1\. Brief description of the topic
+
+The Role of Foreign Direct Investment (FDI) in Accelerating Economic Growth in Eastern European Countries. FDI plays a very important role in driving economic growth in Eastern European Countries because they are in need of external factors to boost their economy. FDI has been a major factor in post-communist economic transformation. My research will be examining how FDI inflows influence GDP growth and whether factors like trade openness, government policies, and corruption affect this relationship.
+
+2\. Motivation for investigating this topic
+
+My motivation from this topic comes from myself and one of my lab partner’s (Darli) being Eastern European and us witnessing from a first hand basis how FDI created jobs and integrated local economics into the global scope.
+
+3\. Potential audiences
+
+The potential audience(s) interested in this research could be:
+
+-   Policymakers and government agencies in Eastern Europe
+
+-   International investors and multinational corporations
+
+-   Economic development organizations (e.g., World Bank, IMF, EU Commission)
+
+-   Academics and researchers in economics and international business
+
+4\. Two or three potential research questions
+
+-   How does FDI impact GDP growth in Eastern European countries?
+
+-   Do higher levels of trade openness strengthen or weaken the effect of FDI on economic growth?
+
+-   Does corruption hinder the positive impact of FDI on economic growth in Eastern Europe?
+
+5\. Ideas about data and potential sources
+
+The type of data I’m interested in using are Economic Growth Data, FDI Inflows Data, Corruption Levels Data and Control Variables (Trade Openness, Government Expenditure, Inflation Rate). I can access all of this data through the databases of the World Bank or in Kaggle.
+
+\pagebreak
+
+## Research Topic 3
+Topic: Evolution and Hybridization of Music Genres Through Audio Features
+
+1\. Brief description of the topic
+
+Investigating how musical characteristics and audio features contribute to genre classification, with particular focus on how genres blend and evolve over time through quantifiable acoustic properties.
+
+2\. Motivation for investigating this topic
+
+Traditional genre classifications are becoming increasingly blurred, and understanding the mathematical relationships between audio features and genre can help us better understand how music evolves and how new genres emerge. This could provide insights into both music theory and cultural trends. Personally playing guitar for over 10 years, producing music and me and Tuna being dj's this interests us a lot.
+
+3\. Potential audiences
+
+- Music streaming platforms and recommendation systems
+- Music producers and industry professionals
+- Musicologists and music theorists
+- Digital audio workstation (DAW) developers
+- Cultural researchers studying music trends
+
+4\. Two or three potential research questions
+
+- How have the defining audio characteristics of specific genres shifted over the past decades?
+- What combination of audio features best predicts a song's genre classification across different streaming platforms?
+- How can we quantify the degree of genre hybridization in modern music using audio features?
+
+5\. Ideas about data and potential sources
+
+- Audio features from Spotify's API (tempo, danceability, energy, valence, etc.)
+- Million Song Dataset or similar large music databases
+- Genre labels from multiple sources (streaming platforms, music charts)
+- Acoustic analysis data (spectral features, rhythm patterns, harmonic content)
+- Temporal data about release dates and peak popularity
+- User listening behavior and playlist data
+- Chart performance data across different genre categories

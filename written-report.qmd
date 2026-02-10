@@ -1,0 +1,752 @@
+---
+title: "Predicting Board Game Average Ratings"
+author: "Statistically Significant - Darli Seranaj, Jacob You, Tuna Korkmaz"
+date: "04/28/2025"
+format: pdf
+execute: 
+  warning: false
+  message: false
+  echo: false
+editor: visual
+---
+
+```{r}
+#| label: load-pkg-data
+library(tidyverse)
+library(tidymodels)
+library(readr)
+library(knitr)
+library(GGally)   
+library(corrplot)
+library(ggplot2)
+library(dplyr)
+library(broom)
+library(rms)
+library(kableExtra)
+
+games <- read_csv("data/games.csv")
+themes <- read_csv("data/themes.csv")
+mechanics <- read_csv("data/mechanics.csv")
+```
+
+## Introduction and Data
+
+### Context
+
+Board games have experienced significant growth in popularity, with thousands of new titles published annually. A key determinant of a game's success is its average user rating (AvgRating), reflecting player engagement and satisfaction. Understanding which attributes contribute to higher ratings can be valuable for game designers, publishers, and retailers.
+
+#### Research Question:
+
+Can we predict a board game’s average rating (AvgRating) based on game attributes such as Number of Expansions, game complexity, number of copies owned and user engagement metrics?
+
+#### Motivation:
+
+1.  Game designers can use these insights to enhance engagement and create better-received games.
+2.  Publishers can refine marketing and production decisions based on influential attributes.
+3.  Retailers and distributors can optimize inventory by understanding factors that contribute to popularity.
+
+#### Hypothesis:
+
+We expect that a combination of game complexity (GameWeight), player engagement metrics (NumOwned, NumUserRatings), and wanting or wishing (NumWant, NumWish) to have a game will be strong predictors of an Average Rating for a board game (AvgRating). Games with deeper strategic depth, and strong community engagement are likely to receive higher ratings. We also will explore if themes and mechanics can explain average rating of a game.
+
+### Dataset Information
+
+The dataset was sourced from BoardGameGeek (BGG), a leading database for board games containing . The data curator used BGG's API to compile the data into different sheets, and published them on [Kaggle](https://www.kaggle.com/datasets/threnjen/board-games-database-from-boardgamegeek?select=games.csv).
+
+We focus on three tables:
+
+1.  games.csv: Contains 21,925 board games with key attributes including ratings, complexity, player count, and user engagement metrics.
+
+2.  themes.csv: 217 binary indicator variables representing thematic categories (e.g., Sci-Fi, Adventure, Fantasy).
+
+3.  mechanics.csv: 157 binary indicator variables representing game mechanics (e.g., Dice Rolling, Deck-Building, Worker Placement).
+
+BGG primarily gets its data from its users, who can submit board game information through BGG's API. BGG then takes this data and aggregates it, generating overall rankings, average rankings, playtime, themes, and other data, using moderators to ensure accuracy and consistency.
+
+## Exploratory Data Analysis
+
+#### Key response variable:
+
+-   AvgRating: The average rating given by users on BoardGameGeek.
+
+#### Key potential predictor variables:
+
+-   NumUserRatings: Number of users who have rated the game.
+-   NumOwned: Number of users who own the game.
+-   NumWant / NumWish: Measures of user interest in having the game.
+-   MinPlayers / MaxPlayers: Range of players the game supports
+-   MfgPlaytime: Manufacturer-stated play time.
+-   GameWeight: An indicator of how difficult or complex the game is.
+-   NumExpansions: Shows the number of expansions a game has
+-   LanguageEase: How easy is it to understand the game.
+-   Theme: Encoded thematic categories (e.g., fantasy, sci-fi).
+-   Mechanic: Encoded mechanics categories (e.g., deck-building).
+
+### Univariate EDA
+
+#### Response EDA - Average Rating
+
+```{r plot, fig.width=6, fig.height=2}
+#| label: rating-histogram
+ggplot(games, aes(x = AvgRating)) +
+  geom_histogram(binwidth = 0.2, fill = "steelblue", color = "black") +
+  labs(title = "Distribution of Average Board Game Ratings", 
+       x = "Average Rating", 
+       y = "Count") +
+  theme_minimal()
+# summary(games$AvgRating)
+```
+
+The distribution of AvgRating is approximately normal, centered around a mean of 6.425 and median of 6.454, indicating symmetry. Most ratings lie between 5.8 (Q1) and 7.1 (Q3), with relatively few games receiving very low or very high scores. Overall, this suggests that most board games on BoardGameGeek are rated favorably, with relatively few games receiving extremely low or extremely high ratings. The near-normal distribution indicates that user ratings are fairly consistent, with a slight tendency toward higher scores.
+
+### Bivariate EDA
+
+```{r plot3, fig.width=6, fig.height=3}
+# Reshape data into long format (logged)
+games_logged <- games |>
+  mutate(
+    log_NumUserRatings = log1p(NumUserRatings),
+    log_NumOwned = log1p(NumOwned),
+    log_NumWant = log1p(NumWant),
+    log_NumWish = log1p(NumWish)
+  ) |>
+  pivot_longer(
+    cols = c(log_NumUserRatings, log_NumOwned, log_NumWant, log_NumWish),
+    names_to = "Metric",
+    values_to = "LogValue"
+  )
+
+ggplot(games_logged, aes(x = LogValue, y = AvgRating)) +
+  geom_point(alpha = 0.4) +
+  facet_wrap(~ Metric, scales = "free_x", ncol = 2) +
+  labs(title = "User Engagement Metrics vs. Average Rating (Log Scale)",
+       x = "Log(Metric + 1)",
+       y = "Average Rating") +
+  theme_minimal()
+```
+
+User engagement metrics (NumUserRatings, NumOwned, NumWant, and NumWish) showed weak but positive associations with AvgRating. Log-transformations clarified these trends, revealing that higher ownership and desire modestly correspond to higher average ratings, supporting the idea that popularity and anticipation reflect perceived quality.
+
+```{r}
+
+#applying all transformations that we want for further investigation '
+#and clearness
+games_clean <- games |> 
+  filter(MinPlayers > 0, MaxPlayers < 15, MinPlayers <= MaxPlayers) %>%
+  filter(GameWeight != 0) %>% 
+  mutate(
+    # Log transformations
+    log_NumUserRatings = log1p(NumUserRatings),
+    log_NumOwned = log1p(NumOwned),
+    log_NumWant = log1p(NumWant),
+    log_NumWish = log1p(NumWish),
+    LogPlaytime = log1p(MfgPlaytime),
+    LogLanguageEase = log1p(LanguageEase),
+    LogMfgAgeRec = log1p(MfgAgeRec),
+    
+    # Grouping player counts
+    MinPlayers_Group = case_when(
+      MinPlayers <= 2 ~ "1-2",
+      TRUE ~ "3+"
+    ),
+    MaxPlayers_Group = case_when(
+      MaxPlayers <= 3 ~ "1-3",
+      TRUE ~ "4+"
+    )) %>%
+  mutate(MaxPlayers_Group = factor(
+    MaxPlayers_Group,
+    levels = c("1-3", "4+")
+  )) %>%
+  mutate(MinPlayers_Group = factor(
+    MinPlayers_Group,
+    levels = c("1-2", "3+")
+  )) %>% 
+  mutate(NumExpansions_Group = case_when(
+    NumExpansions == 0 ~ "0",
+    NumExpansions <= 10 ~ "1-10",
+    TRUE ~ "10+"
+  )) |>
+  mutate(NumExpansions_Group = factor(
+    NumExpansions_Group,
+    levels = c("0", "1-10", "10+")
+  ))
+```
+
+### Final Decisions of EDA
+
+After completing exploratory analysis (more EDA is available in Appendix), we performed the following data cleaning and transformation steps to prepare the data for modeling:
+
+-   Removed games with inconsistent player count data (where MinPlayers \> MaxPlayers) or missing values (0 players).
+-   Limited the dataset to games with fewer than 15 maximum players to focus on standard board games.
+-   Excluded games with a GameWeight of 0, which likely indicated missing complexity ratings.
+-   Log-transformed skewed variables (NumUserRatings, NumOwned, NumWant, NumWish, MfgPlaytime, LanguageEase, MfgAgeRec) using log1p to stabilize variance and create linearity.
+-   Created categorical groupings for:
+    -   MinPlayers (1-2 players vs. 3+ players)
+    -   MaxPlayers (1-3 players vs. 4+ players)
+    -   NumExpansions (0, 1–10, and 10+ expansions)
+-   Themes and Mechanics were explored but not included in final modeling due to high sparsity and variability across games.
+
+These transformations ensured a clean, interpretable dataset, better suited for linear modeling. We also explore potential correlation between predictors. More in depth information regarding this can be found in Appendix however we deal with relevant correlation in our Methodology section.
+
+### Methodology
+
+#### Initial Model Building (Model 1)
+
+We used multiple linear regression to model average user rating (AvgRating) based on gameplay attributes, user engagement metrics, and structural characteristics of board games. Throughout the modeling process, we systematically improved model fit, reduced multicollinearity, and checked model assumptions to ensure robustness and interpretability.
+
+\small
+
+```{r}
+lm_model <- lm(
+  AvgRating ~ log_NumOwned + log_NumWant + log_NumWish + GameWeight + 
+              LogPlaytime + MinPlayers_Group + 
+              MaxPlayers_Group + log_NumUserRatings,
+  data = games_clean
+)
+
+# Model 1: Raw Engagement Model
+tidy(lm_model) |> 
+  kable(digits = 3, caption = "Model 1 Summary: Raw Engagement Metrics")
+
+```
+
+```{r}
+vif(lm_model) |> 
+  enframe(name = "Variable", value = "VIF") |> 
+  kable(digits = 2, caption = "Model 1 VIF Values") %>% 
+  kable_styling(font_size = 9)
+
+```
+
+\normalsize
+
+Model 1 included log-transformed engagement metrics (NumOwned, NumWant, NumWish, NumUserRatings), GameWeight, LogPlaytime, and grouped player count variables. Although $R^2$ = 0.519, high multicollinearity among engagement variables (VIF \> 10) prompted us to reduce redundancy before improving explanatory power.
+
+#### Reducing Multicollinearity and Improving Interpretability (Model 2)
+
+```{r}
+games_clean2 <- games_clean %>% 
+  mutate(log_DesireScore = (log1p(NumWant + NumWish ) / 2)) 
+
+```
+
+\small
+
+```{r}
+lm_model_improved <- lm(
+  AvgRating ~ log_DesireScore + GameWeight + LogPlaytime +
+              MaxPlayers_Group + log_NumOwned,
+  data = games_clean2
+)
+
+# # Model 2: Desire Score Model
+# tidy(lm_model_improved) |> 
+#   kable(digits = 3, caption = "Model 2 Summary: log_DesireScore with 
+#                                Reduced Multicollinearity") 
+
+
+vif(lm_model_improved) |> 
+  enframe(name = "Variable", value = "VIF") |> 
+  kable(digits = 2, caption = "Model 2 VIF Values") %>% 
+  kable_styling(font_size = 9)
+
+```
+
+\normalsize
+
+In Model 2 we excluded log_NumUserRatings and replaced log_NumWant and log_NumWish with log_DesireScore (defined as the mean of log-transformed NumWant and NumWish), retaining log_NumOwned separately to represent actual game ownership. The VIF values dropped significantly across predictors, all falling below 4, suggesting that the multicollinearity problem had been substantially mitigated. 
+
+#### Expanding Predictor Set (Model 3)
+
+\small
+
+```{r}
+# model 3
+lm_model_improved_extra_predictors <- lm(
+  AvgRating ~ log_DesireScore + GameWeight + LogPlaytime + log_NumOwned + 
+              MaxPlayers_Group +
+              LogLanguageEase + NumExpansions_Group,
+  data = games_clean2
+)
+
+# # Model 3: Desire Score Model + predictors extra
+# tidy(lm_model_improved_extra_predictors) |> 
+#   kable(digits = 3, caption = "Model 3 Summary: More Predictors")
+# 
+# 
+# vif(lm_model_improved_extra_predictors) |> 
+#   enframe(name = "Variable", value = "VIF") |> 
+#   kable(digits = 2, caption = "Model 3 VIF Values")
+
+```
+
+\normalsize
+
+After achieving acceptable multicollinearity, we sought to improve predictive power by adding additional meaningful predictors. Based on additional exploratory data analysis and logical reasoning, we added: `LogLanguageEase` (language complexity) and `NumExpansions_Group` (grouped into 0, 1-10, and 10+ expansions).
+
+Model 3 included these additional variables and achieved a higher $R^2$ of 0.550. Importantly, VIF values remained low, confirming that the model remained stable despite the inclusion of extra predictors. We briefly considered adding MfgAgeRec (minimum recommended age) but found that it did not improve model performance and slightly increased overfitting risk.
+
+#### Focusing on Popular Games (Model 4 and Final Model)
+
+\small
+
+```{r}
+games_1000 <- games_clean2 %>%  
+  filter(NumOwned >= 1000) 
+
+lm_model_improved_extra_predictors_1000 <- lm(
+  AvgRating ~ log_DesireScore + GameWeight + log_NumOwned + 
+              MaxPlayers_Group +
+              LogLanguageEase + NumExpansions_Group + LogPlaytime,
+  data = games_1000 
+)
+
+# # Model 4: Desire Score Model
+# tidy(lm_model_improved_extra_predictors_1000) |> 
+#   kable(digits = 3, 
+#         caption = "Model 4 only with NumOwned > 1000") 
+
+```
+
+\normalsize
+
+Recognizing that extremely niche games (with very low ownership) could introduce noise and bias ratings, we restricted our dataset to games with at least 1000 owners. This cutoff ensured that our model predictions would be based on well-established games with a more reliable volume of user ratings.
+
+Model 4 was re-fitted on this filtered dataset. Interestingly, `LogPlaytime` became statistically insignificant (p = 0.29), possibly because popular games tend to converge on similar playtime ranges. When we removed LogPlaytime, our final model achieved an adjusted $R^2$ of 0.657, the highest among all models (equal to model 4), with acceptable multicollinearity (all VIFs \< 3).
+
+\small
+
+```{r}
+# final model 
+
+lm_model_without_interaction_final <- lm(
+  AvgRating ~ log_DesireScore + GameWeight + log_NumOwned + 
+              MaxPlayers_Group +
+              LogLanguageEase + NumExpansions_Group,
+  data = games_1000
+)
+
+# Final Model: After Playtime Cutoff 
+tidy(lm_model_without_interaction_final) |> 
+  kable(digits = 3, caption = "Final Model Summary")
+
+```
+
+\pagebreak
+
+```{r}
+vif(lm_model_without_interaction_final) |> 
+  enframe(name = "Variable", value = "VIF") |> 
+  kable(digits = 2, caption = "Final Model VIF Values")  %>%
+  kable_styling(font_size = 9)
+
+```
+
+\normalsize
+
+We also considered interaction terms. We saw no real interactions and no improvement in $R^2$ or $Adj.R^2$ and they were not statistically significant based on 0.05 p-value threshold, therefore we did not include any interaction terms in our final model in order to reduce complexity. We considered interactions between Game complexity and Max players group and Desire Score and Num Expansions Group which are intuitive considerations.
+
+\small
+
+```{r}
+# Create a dataframe summarizing R-squared and Adjusted R-squared
+model_summaries <- tibble(
+  Model = c(
+    "Model 1",
+    "Model 2",
+    "Model 3",
+    "Model 4: With LogPlaytime",
+    "Final Model: Without LogPlaytime"
+  ),
+  R_Squared = c(
+    summary(lm_model)$r.squared,
+    summary(lm_model_improved)$r.squared,
+    summary(lm_model_improved_extra_predictors)$r.squared,
+    summary(lm_model_improved_extra_predictors_1000)$r.squared,
+    summary(lm_model_without_interaction_final)$r.squared
+  ),
+  Adjusted_R_Squared = c(
+    summary(lm_model)$adj.r.squared,
+    summary(lm_model_improved)$adj.r.squared,
+    summary(lm_model_improved_extra_predictors)$adj.r.squared,
+    summary(lm_model_improved_extra_predictors_1000)$adj.r.squared,
+    summary(lm_model_without_interaction_final)$adj.r.squared
+  )
+)
+
+# Display the table nicely
+model_summaries |> 
+  kable(digits = 3, caption = "Summary of R-Squared and Adjusted R-Squared for Each Model") |> 
+  kable_styling(full_width = FALSE, position = "center", font_size = 9)
+```
+
+\normalsize
+
+#### Checking Model Assumptions
+
+```{r plot5, fig.width=6, fig.height=2.75}
+# checking conditions for final model. 
+augmented_data <- augment(lm_model_without_interaction_final) 
+
+# Plot standardized residuals vs continuous predictors
+augmented_data %>%
+  pivot_longer(cols = c(log_DesireScore, GameWeight, log_NumOwned, LogLanguageEase),
+               names_to = "Predictor", values_to = "Value") %>%
+  ggplot(aes(x = Value, y = .std.resid)) +
+  geom_point(alpha = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  facet_wrap(~ Predictor, scales = "free_x") +
+  labs(title = "Standardized Residuals vs Continuous Predictors",
+       x = "Predictor Value",
+       y = "Standardized Residuals") +
+  theme_minimal()
+
+```
+
+```{r fig.width=6, fig.height=2}
+# Plot histogram of standardized residuals
+ggplot(augmented_data, aes(x = .std.resid)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "black", alpha = 0.7) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Histogram of Standardized Residuals",
+    x = "Standardized Residuals",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+#### Linearity
+
+The residuals were randomly scattered around zero with no discernible patterns or curves. This suggests that the relationship between each predictor and the response variable (AvgRating) is approximately linear, and no major non-linear effects were left unmodeled.
+
+#### Independence
+
+Since the data points (individual board games) are inherently independent of one another — each game is a distinct entity with its own ratings and attributes — the assumption of independence is reasonable. Additionally, no time-based or grouped structure (such as repeated measures) exists in the data that would threaten independence.
+
+#### Constant Variance
+
+The spread of the standardized residuals remained relatively constant across the range of each predictor. There was no evident funneling, fanning out, or other constant variance violation pattern in the residual plots (some slight funneling on NumOwned but given the size of data not concerning).
+
+#### Normality of Residuals
+
+The histogram of standardized residuals displayed a symmetric, bell-shaped curve centered around zero. Although a perfect normal distribution is not required for regression validity, the residuals' distribution was sufficiently close to normal.
+
+### Results
+
+Our final model achieved an $R^2$ of 0.657 and an adjusted $R^2$ of 0.657, meaning it explains about 65.7% of the variability in board game average ratings. The most important predictors identified were **log_DesireScore**, **GameWeight**, **NumOwned**, **MaxPlayers_Group**, **LogLanguageEase**, and **NumExpansions_Group**, along with the interaction between log_DesireScore and GameWeight.
+
+Interestingly, we found that a **10% increase** in the number of copies owned (NumOwned) is associated with a slight **0.026-point decrease** in average rating with other variables held constant. This may suggest that more popular games are exposed to a broader audience and thus subject to more critical reviews. User interest (log_DesireScore), reflecting the average of NumWant and NumWish, was associated with an increase in average rating, suggesting that board games who are wanted are most liked.  
+
+Holding all variables constant, a **one-unit increase** in GameWeight (strategic complexity) leads to a **0.238-point** rise in average rating, confirming that more complex games tend to be more highly rated.
+
+Regarding player count, holding other variables constant, we found that games that support **4 or more players** have an lower average rating when compared to games supporting **1–3 players**, suggesting that smaller-group games are slightly better received. Ease of language also showed a positive effect: a **10% improvement** in LanguageEase corresponds to an approximate **0.008-point increase** in average rating holding all else constant, indicating that more accessible games may have a modest advantage. Finally, games with expansions tend to perform better as each category with expansion led to a higher average rating. This highlights that ongoing content support (through expansions) strongly correlates with higher user satisfaction.
+
+### Discusssion and Conclusion
+
+Our final model provides a strong and interpretable foundation for understanding what makes well-known board games well-received. It highlights that not just popularity, but **desire**, **complexity**, **accessibility**, and **ongoing community engagement** matter most in predicting board game success on BoardGameGeek. Games with **more owners** were surprisingly rated **lower**, likely due to inviting more critical reviews from potentially casual players.
+
+#### Limitations
+
+BoardGameGeek ratings are **user-submitted** and voluntary, meaning the dataset tends to reflect the views of self-selected players who are often hobbyists or enthusiasts and can introduce **selection bias**. As a result, the ratings may not generalize to casual consumers or the broader population of board game buyers.
+
+By filtering the dataset to only games with greater or equal to **1,000 owners**, we ensured more stable ratings and more well known games, but this also introduces **survivorship bias**. Newer, niche, or indie games are excluded, limiting the model’s applicability to predicting ratings for emerging or less-established games.
+
+Although the dataset included detailed **theme and mechanic tags**, the sparsity of these categories, with some categories only having one or two games, led us to exclude them from final modeling. As a result, **genre or mechanic-specific effects** that may exist are **not captured**, such as the potential difference between economy games vs. storytelling games, or dice rolling games vs. card games.
+
+#### Practical Implications and Future Work
+
+Our findings could have important implications for the board game industry. For **designers**, the results emphasize that strategic complexity and accessibility both positively impact reception. **Publishers** can leverage the strong relationship between community desire and ratings by investing early in community engagement strategies, while also continuing to seek out opportunities to release expansions. **Retailers and distributors** can use ownership metrics and early user desire signals to better forecast which games are likely to become fan-favorites.
+
+Future studies could explicitly model **rating trajectories over time** by incorporating data on the release year, first rating date, and changes in average rating over time. This would provide a more dynamic view of game reception. Future research could use **multi-platform data** such as ratings from Amazon, Target, or other game review sites to test whether the same predictors hold outside of the highly engaged BGG community. This could provide external validity and increase the population of our consumers and critics.
+
+\pagebreak 
+
+
+### Appendix
+
+#### (Additional EDA)
+
+#### Predictor Univariate EDA before Bivariate EDA
+
+```{r}
+#| label: showcase-playtime-outliers
+
+games |>
+  arrange(desc(MfgPlaytime)) |>
+  select("Name", "MfgPlaytime") |>
+  slice_head(n = 5)
+```
+
+```{r}
+#| label: plot-log-playtime
+#filter for greater than zero so no NA's (zero was the NA value)
+games <- games |> 
+  filter(MfgPlaytime > 0) %>%
+  mutate(LogPlaytime = log(MfgPlaytime))
+
+ggplot(games, aes(x = LogPlaytime)) +
+  geom_histogram(fill = "steelblue", color = "black", bins = 30) +
+  labs(title = "Log-Transformed Manufacturer Given Playtime", 
+       x = "Log of Minutes of Playtime", 
+       y = "Count") +
+  theme_minimal()
+
+#summary(games$LogPlaytime)
+
+```
+
+Games like The Campaign for North Africa exhibit extreme playtimes (up to 60,000 minutes), leading to a heavily right-skewed distribution for MfgPlaytime. A natural log transformation (excluding zeros) was applied to normalize this skew. Post-transformation, the central 50% of games fall between log-playtimes of 3.2 to 4.5, corresponding to roughly 25–90 minutes — a reasonable range for typical gameplay durations. Extreme outliers persist, but their influence is mitigated.
+
+#### Number of Expansions vs. Average Rating
+
+```{r plot4, fig.width=6, fig.height=2.75}
+games_grouped <- games |>
+  mutate(NumExpansions_Group = case_when(
+    NumExpansions == 0 ~ "0",
+    NumExpansions <= 10 ~ "1-10",
+    TRUE ~ "10+"
+  )) |>
+  mutate(NumExpansions_Group = factor(
+    NumExpansions_Group,
+    levels = c("0", "1-10", "10+")
+  ))
+ggplot(games_grouped, aes(x = NumExpansions_Group, y = AvgRating)) +
+  geom_boxplot(outlier.alpha = 0.3, fill = "lightcoral") +
+  labs(
+    title = "Number of Expansions vs Average Rating",
+    x = "Expansion Group",
+    y = "Average Rating"
+  ) +
+  theme_bw()
+
+
+```
+
+Games with more expansions tend to have higher average ratings, suggesting that expansions are a marker of quality and popularity. While overlap between groups exists, the median rating increases clearly with more expansions.
+
+#### Bivariate EDA
+
+
+```{r}
+# Convert engagement metrics to long format for faceting
+games_engagement_long <- games_clean |> 
+  pivot_longer(
+    cols = c(log_NumUserRatings, log_NumOwned, log_NumWant, log_NumWish),
+    names_to = "Metric",
+    values_to = "LogValue"
+  )
+
+# Faceted histogram plot
+ggplot(games_engagement_long, aes(x = LogValue)) +
+  geom_histogram(fill = "steelblue", color = "black", bins = 30) +
+  facet_wrap(~ Metric, scales = "free") +  
+  labs(title = "Distribution of Engagement Metrics (Log1p Transformed)",
+       x = "Log(1 + Value)", y = "Count") +
+  theme_bw()
+```
+
+The faceted histograms show the log-transformed distributions of NumUserRatings, NumOwned, NumWant, and NumWish, representing different engagement metrics for board games. NumOwned and NumUserRatings follow a right-skewed but smoother distribution after transformation, making them more suitable for modeling. NumWish appears more balanced, suggesting a consistent spread of user interest. However, NumWant remains irregular, with a large spike near zero, indicating many games have few or no "want" requests. To address this, NumWant could be binarized (HasWant = 1 if NumWant \> 0) or grouped into categories to reduce sparsity. We also saw before that we expect multicolinearity so we could also ignore num_want and use a combination of other variables.
+
+```{r}
+top_10_themes <- themes |> 
+  summarise(across(-BGGId, sum)) |>
+  pivot_longer(cols = everything(), names_to = "Theme", values_to = "Count") |>
+  arrange(desc(Count)) |> 
+  slice_head(n = 10) |> 
+  pull(Theme)
+games_themes <- games |> 
+  left_join(themes, by = "BGGId") |> 
+  select(BGGId, AvgRating, all_of(top_10_themes)) |> 
+  pivot_longer(cols = -c(BGGId, AvgRating), names_to = "Theme", 
+               values_to = "HasTheme") |> 
+  filter(HasTheme == 1)
+ggplot(games_themes, aes(x = reorder(Theme, AvgRating, FUN = median), 
+                         y = AvgRating)) +
+  geom_boxplot(outlier.alpha = 0.3, fill = "blue") +
+  labs(title = "Average Rating by Top 10 Themes",
+       x = "Theme",
+       y = "Average Rating") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Among the top 10 most frequent themes, Economic, Adventure, and Animals show slightly higher median ratings, whereas themes like Humor and Movies/TV lag behind. This variation implies that theme choice may influence perception, but popularity alone does not guarantee higher quality in user ratings.
+
+```{r}
+top_10_mechanics <- mechanics |> 
+  summarise(across(-BGGId, sum)) |>
+  pivot_longer(cols = everything(), names_to = "Mechanic", values_to = "Count") |>
+  arrange(desc(Count)) |> 
+  slice_head(n = 10) |> 
+  pull(Mechanic)
+games_mechanics <- games |> 
+  left_join(mechanics, by = "BGGId") |> 
+  select(BGGId, AvgRating, all_of(top_10_mechanics)) |> 
+  pivot_longer(cols = -c(BGGId, AvgRating), names_to = "Mechanic", 
+               values_to = "HasMechanic") |> 
+  filter(HasMechanic == 1)
+ggplot(games_mechanics, aes(x = reorder(Mechanic, AvgRating, FUN = median), 
+                            y = AvgRating)) +
+  geom_boxplot(outlier.alpha = 0.3, fill = "green") +
+  labs(title = "Average Rating by Top 10 Mechanics",
+       x = "Mechanic",
+       y = "Average Rating") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Mechanics such as Simulation, Variable Player Powers, and Hexagon Grid exhibit higher median ratings, potentially reflecting deeper strategic complexity or player agency. Conversely, simpler mechanics like Dice Rolling and Hand Management, while prevalent, are associated with slightly lower average ratings, possibly due to perceived randomness or simplicity.
+
+```{r}
+ggplot(games, aes(x = GameWeight, y = AvgRating)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  labs(title = "Is Relationship Between GameWeight and Average Rating Linear?",
+       x = "GameWeight", y = "Average Rating") +
+  theme_minimal()
+```
+
+We can see that there is some data error with game weight, is there is not supposed to be gameweights of 0. In order to stay consistent with our analysis and use gameweight as a useful predictor, we will drop data that has gameweight of 0 since this is not intended.
+
+#### Player Count vs. Average Rating
+
+```{r}
+games_grouped <- games |> 
+  # group in groups that make sense that we could use for model
+ # if NA no minimum or maximum player quota
+  filter(!is.na(MinPlayers), !is.na(MaxPlayers)) %>%
+  mutate(
+  MinPlayers_Group = case_when(
+    MinPlayers <= 2 ~ "1-2",
+    TRUE ~ "3+"
+  ),
+  MaxPlayers_Group = case_when(
+    MaxPlayers <= 3 ~ "1-3",
+    TRUE ~ "4+"
+  )) |>
+  pivot_longer(cols = c(MinPlayers_Group, MaxPlayers_Group),
+               names_to = "PlayerType", values_to = "Group")
+
+games_grouped <- games_grouped %>%
+  mutate(Group = factor(Group, levels = c("1-2", "3+", "1-3", "4+")))
+
+ggplot(games_grouped, aes(x = Group, y = AvgRating)) +
+  geom_boxplot(outlier.alpha = 0.3, fill = "lightblue") +
+  facet_wrap(~ PlayerType, ncol = 2, scales = "free_x") +
+  labs(title = "Grouped Player Count vs. Average Rating",
+       x = "Player Count Group",
+       y = "Average Rating") +
+  theme_bw()
+```
+
+The boxplots above compare the average ratings of board games grouped by their minimum and maximum player count.
+
+Games supporting 1–3 players (MaxPlayers_Group) and games requiring only 1–2 players (MinPlayers_Group) tend to have slightly higher median ratings than those accommodating larger groups. However, the differences are small, and the interquartile ranges overlap substantially.
+
+Thus, while there may be a modest preference for games that support smaller groups, **player count alone does not appear to be a strong driver of average rating**. Other factors such as complexity, engagement, or theme likely have a more significant impact on perceived game quality.
+
+#### Playtime of a Board Game vs. Average Rating
+
+```{r}
+# Create a long-format dataset with both raw and log-transformed playtime
+games_playtime <- games |>
+  mutate(
+    LogPlaytime = log1p(MfgPlaytime)  # log1p to handle zero values safely
+  ) |>
+  pivot_longer(cols = c(MfgPlaytime, LogPlaytime),
+               names_to = "Scale",
+               values_to = "Playtime_Value")
+
+# Faceted plot
+ggplot(games_playtime, aes(x = Playtime_Value, y = AvgRating)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(~ Scale, scales = "free_x") +  # Ensures separate axes for each
+  labs(title = "Playtime vs. Average Rating (Raw and Log Scale)",
+       x = "Playtime (Minutes)",
+       y = "Average Rating") +
+  theme_minimal()
+```
+
+The plots show the relationship between playtime and average rating, with most games clustered at shorter durations. While no strong linear trend exists, some highly rated games have longer playtimes, suggesting that complexity may enhance reception.
+
+After log transformation, the distribution becomes more balanced, revealing a slight positive trend where games with 30–120 minutes of playtime tend to score higher. However, beyond this, diminishing returns appear, as excessively long games do not necessarily receive better ratings. Playtime alone does not determine success; a potential interactions with mechanics of games, likely play a more significant role in user ratings.
+
+#### Exploring Correlation and Interaction effects between potential predictors
+
+```{r}
+games_selected <- games_clean |> 
+  select(
+    log_NumUserRatings, log_NumOwned, log_NumWant, log_NumWish,  
+    MinPlayers_Group, MaxPlayers_Group,  # Kept as original categorical values
+    LogPlaytime,  # Log-transformed Playtime
+    GameWeight,  # Complexity metric
+    NumExpansions_Group, # Categorical 
+    LogLanguageEase
+  )
+
+games_continuous <- games_selected %>%
+  select(log_NumUserRatings, log_NumOwned, log_NumWant, log_NumWish,
+         LogPlaytime, GameWeight, LogLanguageEase)
+
+ggpairs(
+  games_continuous,
+  lower = list(continuous = wrap("smooth", alpha = 0.3)),
+  upper = list(continuous = wrap("cor", size = 3)),
+  diag = list(continuous = wrap("densityDiag", size = 0.8)),
+  title = "Pairwise Plot: Continuous Predictors Only"
+) +
+  theme(axis.text.x = element_text(angle = 45, size = 7),
+        axis.text.y = element_text(size = 7))
+```
+
+The pairwise plot of continuous predictors reveals strong positive correlations among the engagement metrics, particularly between log_NumUserRatings and log_NumOwned (r = 0.952), and between log_NumWant and log_NumWish (r = 0.931). This suggests that games with higher user activity in one area (e.g., ownership) also tend to be highly desired or rated. The strong correlations highlight potential multicollinearity concerns if these predictors are included together in a regression model. Moderate positive correlations were also observed between GameWeight and LogPlaytime (r = 0.720), indicating that more complex games generally take longer to play. LogLanguageEase was negatively correlated with engagement metrics, though the relationships were weaker (r ≈ -0.2 to -0.3), suggesting that harder-to-understand games may slightly deter engagement. Overall, careful variable selection or the creation of composite metrics is necessary to minimize redundancy and ensure model stability.
+
+### Model 3 VIF and terms (after adding two more predictors)
+
+```{r}
+# Model 3: Desire Score Model + predictors extra
+tidy(lm_model_improved_extra_predictors) |>
+  kable(digits = 3, caption = "Model 3 Summary: More Predictors")
+
+
+vif(lm_model_improved_extra_predictors) |>
+  enframe(name = "Variable", value = "VIF") |>
+  kable(digits = 2, caption = "Model 3 VIF Values")
+```
+
+
+### Interaction Terms in modeling
+
+```{r}
+games_interaction <- games_1000 %>%
+  mutate(
+    c_log_DesireScore = log_DesireScore - mean(log_DesireScore, na.rm = TRUE),
+    c_GameWeight = GameWeight - mean(GameWeight, na.rm = TRUE)
+  )
+
+lm_model_with_interaction2 <- lm(
+  AvgRating ~ c_log_DesireScore + c_GameWeight + log_NumOwned + 
+              MaxPlayers_Group + c_log_DesireScore * NumExpansions_Group +
+              LogLanguageEase + NumExpansions_Group,
+  data = games_interaction
+)
+
+summary(lm_model_with_interaction2)
+vif(lm_model_with_interaction2)
+
+```
+
+```{r}
+lm_model_with_interaction3 <- lm(
+  AvgRating ~ c_log_DesireScore + c_GameWeight + log_NumOwned + 
+              MaxPlayers_Group + c_log_DesireScore * MaxPlayers_Group +
+              LogLanguageEase + NumExpansions_Group,
+  data = games_interaction
+)
+
+summary(lm_model_with_interaction3)
+vif(lm_model_with_interaction3)
+```
+
+As we can see no significant improvement was made in explaining variability of board game average rating with these interaction terms, therefore we did not include them in our model.

@@ -1,0 +1,197 @@
+---
+title: "Predicting Average Board Game Ratings"
+author: "Team name - Statistically Significant"
+date: March 28, 2025
+format: 
+  revealjs: 
+    theme: dark
+    slide-number: true
+    preview-links: auto
+    smaller: true
+---
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(readr)
+library(knitr)
+library(GGally)   
+library(corrplot) 
+library(MASS)
+
+games <- read_csv("../data/games.csv")
+themes <- read_csv("../data/themes.csv")
+mechanics <- read_csv("../data/mechanics.csv")
+```
+
+## Context
+
+Board Game Industry Overview
+
+- Significant growth in recent years
+
+- User ratings critical for game success
+
+- **Research Question:** What attributes contribute to game ratings?
+
+Key Focus
+
+- Analyzing board game characteristics
+
+- Understanding rating determinants
+
+- Insights for game designers and publishers
+
+## Dataset
+
+- 21,925 board games sourced from BoardGameGeek as recent as 2021
+
+- Key attributes including ratings, complexity, player count, themes, mechanics, etc.
+
+```{r}
+glimpse(games)
+```
+
+## Univariate EDA
+
+```{r, layout="[[1,1]]"}
+#| fig.show: "hold"
+#| out.width: "50%"
+ggplot(games, aes(x = AvgRating)) +
+  geom_histogram(binwidth = 0.2, fill = "steelblue", color = "black") +
+  labs(title = "Distribution of Average Board Game Ratings", 
+       x = "Average Rating", 
+       y = "Count") +
+  theme_minimal()
+
+games <- games |> 
+  filter(MfgPlaytime > 0) %>%
+  mutate(LogPlaytime = log(MfgPlaytime))
+
+ggplot(games, aes(x = LogPlaytime)) +
+  geom_histogram(fill = "steelblue", color = "black", bins = 30) +
+  labs(title = "Log-Transformed Manufacturer Given Playtime", 
+       x = "Log of Minutes of Playtime", 
+       y = "Count") +
+  theme_minimal()
+```
+
+::: {.columns}
+::: {.column width="50%"}
+
+- Approximately normal distribution
+
+- Peak around 7.0-7.5 rating
+
+- Suggests most games are rated positively
+
+- Few extremely low or extremely high-rated games
+:::
+
+::: {.column width="50%"}
+
+- Right-skewed distribution transformed to fit better
+
+- Helps normalize range of game playtimes
+
+- Most games cluster around middle playtime ranges
+
+- Allows for more meaningful analysis
+:::
+:::
+
+
+## Bivariate EDA
+
+```{r, layout="[[1,1]]"}
+#| fig.show: "hold"
+#| out.width: "50%"
+ggplot(games, aes(x = log(MfgPlaytime), y = AvgRating)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Playtime (Log Scale) vs. Average Rating",
+       x = "Log Playtime",
+       y = "Average Rating") +
+  theme_minimal()
+
+games |>
+  filter(GameWeight != 0) |>
+ggplot(aes(x = GameWeight, y = AvgRating)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Game Complexity vs. Average Rating",
+       x = "User Rated Game Complexity (Scale 1-5)",
+       y = "Average Rating") +
+  theme_minimal()
+```
+
+::: {.columns}
+::: {.column width="50%"}
+
+- Slight positive correlation
+
+- Longer playtimes tend to have marginally higher ratings
+
+- Significant variation in ratings across different playtimes
+
+- Suggests playtime is a weak but potentially meaningful predictor
+:::
+
+::: {.column width="50%"}
+
+- Clear positive correlation
+
+- More complex games tend to receive higher ratings
+
+- Steeper trend line compared to playtime
+
+- Complexity might be a stronger predictor of game ratings
+:::
+:::
+
+
+## Initial Modeling
+
+::: {.columns}
+
+::: {.column width="50%"}
+```{r, layout="[[1,1]]"}
+#| fig.show: "hold"
+#| out.width: "50%"
+# Full model (all applicable variables)
+full_model <- lm(AvgRating ~ GameWeight + LogPlaytime +
+                   MinPlayers + MaxPlayers + LanguageEase + IsReimplementation +
+                   NumWant + NumWish + NumOwned + NumUserRatings, 
+                 data = games)
+
+tidy(full_model) |>
+  kable(digits = 3) %>% 
+  kableExtra::kable_styling(font_size = 14)
+
+```
+
+:::
+
+::: {.column width="50%"}
+![](./Correlation.png) 
+```{r}
+paste0("R_Squared: " ,summary(full_model)$r.squared)    # R-squared
+```
+
+:::
+
+:::
+
+## Next Research Directions
+
+**Proposed Investigations**
+
+- Looking into a model with the log transformed variables that we decided in EDA.
+  
+- Checking interaction terms and dealing with correlation between predictors.
+
+**Potential Exploration Areas**
+
+- NumWish, NumWanted, NumOwned variable change
+
+- Genre-specific rating factors
+
